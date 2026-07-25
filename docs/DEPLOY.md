@@ -61,24 +61,57 @@ Non-secret settings live in `wrangler.jsonc` under `vars` (`TIMEZONE`,
 `ANTHROPIC_MODEL`, `LIFTLOGIC_WORKOUTS_SQL`). Those are visible in the dashboard,
 so anything sensitive belongs in `secret put` instead.
 
-## 4. Deploy
+## 4. Deploy from GitHub
+
+Pushing to `main` builds and deploys automatically — no laptop, no Docker, no
+manual step. `.github/workflows/deploy.yml` does it, and it also builds every
+pull request and validates the Worker bundle without deploying, so a broken
+config fails on the PR instead of in production.
+
+Add two **GitHub** secrets (Settings → Secrets and variables → Actions):
+
+| GitHub secret | Where to get it |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens → Create Token → **Edit Cloudflare Workers** template |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → Workers & Pages → right-hand sidebar |
+
+> **These are deploy credentials only.** They are not the five runtime secrets
+> from step 3. Those live on the Worker itself, are set once with
+> `wrangler secret put`, and survive every deploy — never put them in GitHub.
+
+### Alternative: let Cloudflare pull the repo itself
+
+If you'd rather not keep tokens in GitHub, connect the repo in the Cloudflare
+dashboard instead (Workers & Pages → your Worker → Settings → Builds → Connect).
+Cloudflare then clones and builds on each push. Settings:
+
+- **Build command:** `npm run build`
+- **Deploy command:** `npx wrangler deploy`
+
+The root `build` script installs the `web/` dependencies itself, so a clean
+checkout builds with no extra configuration. If you go this route, delete
+`.github/workflows/deploy.yml` so the two don't both deploy on the same push.
+
+### Deploying by hand
+
+Still works, for a one-off:
 
 ```sh
-npm install
-npm run deploy        # builds web/dist, then wrangler deploy
+npm install && npm run deploy
 ```
 
-One Worker serves both the API (`/api/*`) and the SPA. Add a custom domain in
-the dashboard if you don't want the `*.workers.dev` URL.
+### Where this lands, and the Pages question
 
-### Why not a separate Pages project?
+One Worker serves both the API (`/api/*`) and the website. It appears under
+**Workers & Pages** in the dashboard and gets a `*.workers.dev` URL; add a
+custom domain there when you want a real address.
 
-Workers now serves static assets natively, and **static asset requests are free
-and don't count against the daily request limit**. Putting the SPA on the same
-Worker means one deploy, one origin, and no CORS between the app and its API. A
-separate Pages project would add a second deploy and CORS config to configure
-and keep in sync, for nothing gained. The build output is still a plain static
-bundle, so moving it to Pages later is a config change, not a rewrite.
+There is deliberately **no separate Pages project**. Workers serves static
+assets natively, those requests are free and don't count against the daily
+request limit, and a single origin means no CORS between the site and its API —
+one deploy instead of two to keep in sync. The frontend is still a plain static
+bundle in `web/dist`, so splitting it onto Pages later is a config change rather
+than a rewrite. Say so if you want that split and it's a small change.
 
 ---
 
