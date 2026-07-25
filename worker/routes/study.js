@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { db } from "../db.js";
-import { processNextChunk } from "../ingest.js";
 
 const study = new Hono();
 
@@ -300,84 +299,70 @@ study.get("/heatmap", async (c) => {
   return c.json([...byCourse.values()]);
 });
 
-// ---------------- ingest ----------------
-// The browser extracts PDF text (pdf.js) and posts chunks. Chunk text is stored
-// so a job survives the phone being locked; a queue message per chunk does the
-// generation. Nothing large flows through the Worker request body twice.
+// ---------------- adding questions ----------------
+// Questions are written by hand or pasted in bulk. Nothing is generated, so
+// the app needs no AI provider and no API key.
 
-study.get("/ingest/jobs", async (c) => {
-  const rows = await db(c.env).query(
-    `SELECT j.*, c.name AS course_name, u.name AS unit_name
-       FROM ingest_jobs j
-       JOIN courses c ON c.id = j.course_id
-       JOIN units   u ON u.id = j.unit_id
-      ORDER BY j.created_at DESC LIMIT 20`
-  );
-  return c.json(rows);
-});
+const isText = (v) => typeof v === "string" && v.trim().length > 0;
 
-study.post("/ingest", async (c) => {
-  if (!c.env.ANTHROPIC_API_KEY)
-    return c.json({ error: "ANTHROPIC_API_KEY is not configured" }, 503);
+/** Validate a batch up front so a bad paste fails as a whole, not halfway through. */
+function validate(questions) {
+  const problems = [];
+  questions.forEach((q, i) => {
+    const n = i + 1;
+    if (!isText(q.stem)) problems.push(`Question ${n}: missing the question text`);
+    if (!Array.isArray(q.options) || q.options.length !== 4 || !q.options.every(isText))
+      problems.push(`Question ${n}: needs exactly 4 non-empty answer options`);
+    if (!Number.isInteger(q.correct_index) || q.correct_index < 0 || q.correct_index > 3)
+      problems.push(`Question ${n}: mark exactly one option as correct`);
+    if (q.rationales != null && !Array.isArray(q.rationales))
+      problems.push(`Question ${n}: rationales must be a list`);
+  });
+  return problems;
+}
 
-  const { course_id, unit_name, filename, chunks } = await c.req.json();
-  if (!course_id || !unit_name) return c.json({ error: "course_id and unit_name required" }, 400);
-  if (!Array.isArray(chunks) || chunks.length === 0)
-    return c.json({ error: "no text extracted from the PDF" }, 400);
+study.post("/questions/import", async (c) => {
+  const { course_id, unit_name, questions } = await c.req.json().catch(() => ({}));
+  if (!course_id || !isText(unit_name))
+    return c.json({ error: "course_id and unit_name are required" }, 400);
+  if (!Array.isArray(questions) || questions.length === 0)
+    return c.json({ error: "no questions to import" }, 400);
+
+  const problems = validate(questions);
+  if (problems.length) return c.json({ error: problems.join("\n"), problems }, 400);
 
   const sql = db(c.env);
-  const [course] = await sql.query("SELECT * FROM courses WHERE id = $1", [course_id]);
+  const [course] = await sql.query("SELECT id, name FROM courses WHERE id = $1", [course_id]);
   if (!course) return c.json({ error: "course not found" }, 400);
 
   const [unit] = await sql.query(
-    `INSERT INTO units (course_id, name) VALUES ($1,$2)
+    `INSERT INTO units (course_id, name) VALUES ($1, $2)
      ON CONFLICT (course_id, name) DO UPDATE SET name = EXCLUDED.name
      RETURNING *`,
     [course.id, unit_name.trim()]
   );
 
-  const [job] = await sql.query(
-    `INSERT INTO ingest_jobs (course_id, unit_id, filename, total_chunks)
-     VALUES ($1,$2,$3,$4) RETURNING *`,
-    [course.id, unit.id, filename || "lecture.pdf", chunks.length]
-  );
+  // Rationales are optional; the column requires four entries, so pad the gaps.
+  const rows = questions.map((q) => ({
+    topic: isText(q.topic) ? q.topic.trim() : null,
+    nclex_category: isText(q.nclex_category) ? q.nclex_category.trim() : null,
+    stem: q.stem.trim(),
+    options: q.options.map((o) => o.trim()),
+    correct_index: q.correct_index,
+    rationales: Array.from({ length: 4 }, (_, i) => (q.rationales?.[i] ?? "").trim()),
+  }));
 
   const inserted = await sql.query(
-    `INSERT INTO ingest_chunks (job_id, seq, content)
-     SELECT $1, ordinality - 1, value
-       FROM unnest($2::text[]) WITH ORDINALITY AS t(value, ordinality)
-     RETURNING id, seq`,
-    [job.id, chunks]
+    `INSERT INTO questions
+       (course_id, unit_id, topic, nclex_category, stem, options, correct_index, rationales, source)
+     SELECT $1, $2, q->>'topic', q->>'nclex_category', q->>'stem',
+            q->'options', (q->>'correct_index')::int, q->'rationales', 'manual'
+       FROM jsonb_array_elements($3::jsonb) AS q
+     RETURNING id`,
+    [course.id, unit.id, JSON.stringify(rows)]
   );
 
-  return c.json({ job_id: job.id, total_chunks: inserted.length });
-});
-
-// Generate questions for one chunk. The client calls this repeatedly while the
-// app is open; each call is a single Anthropic request, which keeps every
-// invocation well inside the free plan's subrequest and CPU budgets.
-study.post("/ingest/step", async (c) => {
-  if (!c.env.ANTHROPIC_API_KEY)
-    return c.json({ error: "ANTHROPIC_API_KEY is not configured" }, 503);
-  const body = await c.req.json().catch(() => ({}));
-  return c.json(await processNextChunk(c.env, body.job_id ?? null));
-});
-
-// Any job with work left, so the app can resume one it didn't finish.
-study.get("/ingest/pending", async (c) => {
-  const rows = await db(c.env).query(
-    `SELECT j.id AS job_id, j.status, j.done_chunks, j.total_chunks, j.questions_created,
-            u.name AS unit_name, j.filename,
-            count(ch.id) FILTER (WHERE ch.status IN ('pending','running')) AS remaining
-       FROM ingest_jobs j
-       JOIN units u ON u.id = j.unit_id
-       LEFT JOIN ingest_chunks ch ON ch.job_id = j.id
-      WHERE j.status = 'running'
-      GROUP BY j.id, u.name
-     HAVING count(ch.id) FILTER (WHERE ch.status IN ('pending','running')) > 0
-      ORDER BY j.created_at`
-  );
-  return c.json(rows.map((r) => ({ ...r, remaining: Number(r.remaining) })));
+  return c.json({ imported: inserted.length, unit: unit.name });
 });
 
 export default study;

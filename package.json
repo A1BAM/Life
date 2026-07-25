@@ -14,7 +14,6 @@
     "check": "npm run build && wrangler deploy --dry-run"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
     "@neondatabase/serverless": "^1.1.0",
     "hono": "^4.12.32"
   },

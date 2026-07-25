@@ -42,8 +42,8 @@ export default function Practice() {
     return (
       <div className="max-w-md mx-auto p-4 pt-16 text-center space-y-4">
         <p className="text-zinc-400">No questions here yet.</p>
-        <Link to="/study/ingest" className="text-emerald-400 font-medium">
-          Ingest a lecture →
+        <Link to="/study/add" className="text-emerald-400 font-medium">
+          Add questions →
         </Link>
       </div>
     );

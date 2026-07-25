@@ -7,8 +7,11 @@ Three steps. Everything runs on free tiers.
 Create a database, then run `sql/001_init.sql` in the Neon SQL Editor (or
 `psql "$DATABASE_URL" -f sql/001_init.sql`). It's idempotent.
 
-Optional: `sql/seed_demo.sql` adds a demo course and 5 questions so you can try
-practice mode before generating anything.
+Optional: `sql/seed_demo.sql` adds a demo course and 5 questions so you have
+something to practise against straight away.
+
+Already ran an earlier version of the schema? Also run `sql/002_no_ai.sql` — it
+drops two tables that were only used by the removed question generator.
 
 Copy the **pooled** connection string (the one with `-pooler` in the host).
 
@@ -27,7 +30,6 @@ want.
 
 ```sh
 npx wrangler secret put DATABASE_URL       # Neon pooled URL from step 1
-npx wrangler secret put ANTHROPIC_API_KEY  # sk-ant-...
 npx wrangler secret put APP_PASSWORD       # what you type to unlock the app
 npx wrangler secret put SESSION_SECRET     # openssl rand -base64 32
 ```
@@ -35,7 +37,6 @@ npx wrangler secret put SESSION_SECRET     # openssl rand -base64 32
 | Secret | Without it |
 |---|---|
 | `DATABASE_URL` | every request fails |
-| `ANTHROPIC_API_KEY` | question generation returns 503; the rest works |
 | `APP_PASSWORD` | **the app is open to anyone with the URL** |
 | `SESSION_SECRET` | same — auth needs both to switch on |
 
@@ -67,7 +68,7 @@ range, returns a `date` column). Until it's set, training uses a one-tap
 
 ## Local development
 
-Put `DATABASE_URL` and `ANTHROPIC_API_KEY` in `.dev.vars` (gitignored), then:
+Put `DATABASE_URL` in `.dev.vars` (gitignored), then:
 
 ```sh
 npx wrangler dev                 # API on :8787
@@ -79,6 +80,6 @@ Omitting `APP_PASSWORD`/`SESSION_SECRET` locally skips the login screen.
 ## Things to expect
 
 - **First request after idle is slow** (~½ s) — Neon wakes from sleep.
-- **Generating questions needs the page open.** Cloudflare's free plan has no
-  background jobs, so the browser drives it one chunk at a time. Leaving pauses
-  it; reopening the app resumes where it stopped.
+- **Questions are yours to add.** Study → Add takes typed or pasted questions;
+  there's no AI and no API key. Paste format is on that screen behind
+  "Show the format".

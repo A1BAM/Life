@@ -7,7 +7,7 @@ import Today from "./screens/Today";
 import Study from "./screens/Study";
 import Practice from "./screens/Practice";
 import Courses from "./screens/Courses";
-import Ingest from "./screens/Ingest";
+import AddQuestions from "./screens/AddQuestions";
 import Settings from "./screens/Settings";
 
 export default function App() {
@@ -37,7 +37,7 @@ export default function App() {
         <Route path="/study" element={<Study />} />
         <Route path="/study/practice" element={<Practice />} />
         <Route path="/study/courses" element={<Courses />} />
-        <Route path="/study/ingest" element={<Ingest />} />
+        <Route path="/study/add" element={<AddQuestions />} />
         <Route path="/settings" element={<Settings onLogout={() => setAuthed(false)} />} />
         <Route path="/login" element={<Login onLogin={() => setAuthed(true)} />} />
       </Routes>

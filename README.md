@@ -1,8 +1,7 @@
 # Life
 
 Single-user life dashboard on **Cloudflare Workers + Neon**. Phase 1: app shell
-(Today screen, auth, full schema) plus the **study engine** — the only way to
-study is answering NCLEX-style questions generated from your own lecture PDFs.
+(Today screen, auth, full schema) plus the **study engine** — the only way to study is answering questions, never re-reading.
 
 ## Setup
 
@@ -20,7 +19,6 @@ npm run db:seed          # optional: demo course + 5 questions
 # 3. Cloudflare (free plan — no Queues, no cron, no paid features)
 npx wrangler secret put DATABASE_URL
 npx wrangler secret put LIFTLOGIC_DATABASE_URL
-npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler secret put APP_PASSWORD
 npx wrangler secret put SESSION_SECRET      # openssl rand -base64 32
 
@@ -36,9 +34,9 @@ Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
 
 - **Today** — date, exam countdown, study card (status color + one number + one tap).
 - **Study heatmap** — units × courses colored by accuracy; tap a cell to drill it.
-- **Ingest** — pick a lecture PDF; the phone extracts the text and drives
-  generation one chunk at a time. Leave the page and it pauses; reopen the app
-  and it resumes from where it stopped.
+- **Add questions** — type or paste them in a plain format (blank line between
+  questions, `*` marks the right answer). Live preview and per-question errors
+  before anything is saved. No AI, no API key.
 - **Practice** — due reviews first, then unseen, then rotation. Answer → per-option
   rationales. Wrong answers re-queue at 1d/3d/7d; twice-right questions retire.
 - **Courses** — exam registry, weights, scores, and the "what do I need on the
@@ -56,10 +54,8 @@ Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
 ## Layout
 
 ```
-sql/       001_init.sql (schema) · liftlogic_readonly_role.sql · seed_demo.sql
+sql/       001_init.sql (schema) · 002_no_ai.sql · liftlogic_readonly_role.sql · seed_demo.sql
 worker/    Hono API on Workers
   routes/  study.js · today.js · training.js
-  ai/      question generation (Anthropic, server-side key)
-  ingest.js  claim-and-generate one chunk per call (no queue, no cron)
 web/       React + Vite + Tailwind SPA, mobile-first, dark
 ```

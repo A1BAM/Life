@@ -59,22 +59,10 @@ export default function Today() {
         number={study.due_reviews > 0 ? study.due_reviews : study.answered_today}
         numberLabel={study.due_reviews > 0 ? "due" : "answered today"}
         action={study.total_questions > 0 ? "Practice" : null}
-        emptyHint={study.total_questions === 0 ? "no questions yet — ingest a lecture" : null}
+        emptyHint={study.total_questions === 0 ? "no questions yet — add some" : null}
         sub={study.accuracy_7d != null ? `${study.accuracy_7d}% this week` : null}
       />
 
-      {/* future modules appear here as they ship */}
-      <div className="grid grid-cols-2 gap-3 opacity-40">
-        {["Training", "Calendar", "Reset", "Daily"].map((m) => (
-          <div key={m} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${STATUS_STYLES.grey}`} />
-              <span className="text-zinc-400 text-sm">{m}</span>
-            </div>
-            <div className="text-zinc-600 text-xs mt-2">soon</div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

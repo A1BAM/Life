@@ -12,11 +12,9 @@ The file is idempotent — re-running it is safe.
 | `courses` | course registry | `grade_min` drives the grade-scenario table |
 | `exams` | dates, weights, scores | `score IS NULL` = not yet taken |
 | `units` | heatmap rows | unique per (course, name); declared at ingest time |
-| `questions` | the bank | `options`/`rationales` are `jsonb`, each constrained to exactly 4 entries; `correct_index` constrained to 0–3; `status` active/retired; `consecutive_correct` drives retirement; `nclex_category` pre-tags for module 4.6 |
+| `questions` | the bank, all hand-entered | `options`/`rationales` are `jsonb`, each constrained to exactly 4 entries; `correct_index` constrained to 0–3; `status` active/retired; `consecutive_correct` drives retirement; `nclex_category` pre-tags for module 4.6 |
 | `question_attempts` | every answer ever | feeds accuracy, heatmap, weekly review |
 | `review_queue` | spaced repetition | `stage` 0/1/2 = 1d/3d/7d; row deleted on retirement |
-| `ingest_jobs` | one per uploaded lecture | progress counters polled by the ingest screen |
-| `ingest_chunks` | chunk text + per-chunk state | makes a job resumable after a closed tab; `pending`/`running`/`done`/`error` with an attempt counter. Claimed atomically via `UPDATE … FOR UPDATE SKIP LOCKED`, so concurrent tabs can't duplicate work |
 | `weekly_targets` | training targets (4.2) | per-day intent as `jsonb` |
 | `workouts_manual` | the "trained today" fallback | LiftLogic sessions are **read live**, never copied here |
 
