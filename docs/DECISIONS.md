@@ -11,29 +11,13 @@ change — flag anything wrong in review and it gets swapped.
 | Backend | **Cloudflare Workers + Hono** | Follows from Neon + Cloudflare. Express and `better-sqlite3` cannot run on Workers, so the server was ported rather than pointed at a new database |
 | Frontend | React + Vite + Tailwind, served as static assets by the same Worker | One deploy, one origin, no CORS |
 | Auth | Single password → HMAC-signed cookie (WebCrypto) | Stateless: no session table, no DB round trip per request. Auth switches on only when `APP_PASSWORD` **and** `SESSION_SECRET` are both set |
-| AI | Anthropic API, `claude-opus-5`, key server-side only | Structured outputs (JSON schema) guarantee parseable question JSON |
+| AI | **None** | Removed at your request — it was the only thing needing a paid API key. Questions are typed or pasted instead |
 | Hosting | Cloudflare Workers, **free plan**, one Worker serving both API and SPA | Replaces the earlier self-hosted-Docker plan. No separate Pages project: Workers serves static assets natively, asset requests are free and don't count against the daily request budget, and one origin means no CORS to configure |
 
 ### Why the runtime changed with the database
 
-Workers has no filesystem and no long-lived processes, which invalidated three
-things from the first pass:
+Workers has no filesystem and no long-lived processes:
 
-- **PDF parsing moved to the browser.** `pdf-parse` is Node-only, and a 250-slide
-  deck is a large multipart upload. pdf.js now extracts text on the phone and
-  posts only the text — the 1.3 MB pdf.js bundle is lazy-loaded so it never
-  touches the Today screen.
-- **Background generation became client-driven.** A Worker can't keep working
-  after the response is sent, and the two server-side answers are both blocked on
-  the free plan: Cloudflare Queues is paid-only, and a polling cron would hold
-  the Neon instance awake around the clock and burn its monthly compute-hour
-  allowance. So chunk text is persisted (`ingest_chunks`) and the browser calls
-  `POST /api/study/ingest/step` once per chunk. Claiming is atomic (a single
-  `UPDATE … FOR UPDATE SKIP LOCKED`), so two open tabs can't duplicate work, and
-  a chunk left `running` for two minutes becomes claimable again. Leaving the
-  page pauses a job rather than losing it — reopening the app resumes it.
-  The accepted trade: an unfinished deck waits for you instead of finishing on
-  its own.
 - **Transactions became CTEs.** Neon's HTTP driver has no interactive
   transactions, so recording an attempt (grade → log → update streak → move the
   SRS queue) is one statement with mutually-exclusive data-modifying CTEs. One
@@ -43,11 +27,9 @@ things from the first pass:
 
 | Constraint | Consequence |
 |---|---|
-| Cloudflare Queues is paid-only | Generation is client-driven, one chunk per request |
 | A cron would hold Neon open 24/7 and drain its compute-hour allowance | No cron at all — the database is touched only while the app is in use |
 | Neon autosuspends when idle | The first request after a gap takes roughly half a second |
-| Cloudflare cuts a request at ~100s | A slow chunk fails, returns to `pending`, and retries (3 attempts). `ANTHROPIC_MODEL` can be pointed at a faster model if it recurs |
-| 100k Worker requests/day | Not a factor: a 250-slide deck costs ~20 requests, a practice answer costs 1, static assets are free |
+| 100k Worker requests/day | Not a factor: a practice answer costs 1 request, static assets are free |
 
 ## LiftLogic (spec §4.2)
 
@@ -66,17 +48,21 @@ things from the first pass:
 
 ## Study engine (spec §4.3)
 
-- **Units are declared at upload time** ("Endocrine"), not auto-detected per
-  chunk — auto-detected names drift ("DKA" vs "Diabetic Ketoacidosis") and would
-  fragment the heatmap. Each question still gets a finer `topic` and an NCLEX
-  client-need category, which pre-feeds module 4.6.
+- **Units are named when you add questions** ("Endocrine") and are the heatmap's
+  rows. Each question can also carry a finer `topic` line.
 - **SRS**: wrong → queue at 1d; correct while queued advances 1d→3d→7d; two
   *consecutive* corrects retire the question; a wrong answer on a retired
   question reactivates it. When everything in a filter is retired, practice
   recycles rather than showing an empty screen. All six transitions are verified
   against Postgres.
-- **Chunking** groups whole pages to ~8k chars (10–20 chunks for a 250-slide
-  deck), 5–7 questions per chunk.
+- **Questions come from you.** With AI removed, Study → Add accepts typed or
+  pasted questions in a plain format (blank line between questions, `*` marks
+  the answer, `- A:` lines add rationales). Parsed and previewed in the browser,
+  validated again server-side; a bad batch is rejected whole with per-question
+  errors rather than half-importing. **The cost of dropping AI: nothing turns a
+  250-slide deck into a question bank any more — that legwork is yours.** The
+  recall-only engine around it (practice, spaced repetition, heatmap) is
+  unchanged.
 - **Flashcard HTML export (4.3.6)**: dropped — you build these ad hoc already,
   and practice-only is the point.
 - **The answer never leaves the server** until an attempt is recorded.

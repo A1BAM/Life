@@ -35,6 +35,31 @@ today.get("/", async (c) => {
     ),
   ]);
 
+  const [[daily], [rst], [train]] = await Promise.all([
+    sql.query(
+      `SELECT (SELECT count(*)::int FROM nn_items WHERE active) AS total,
+              (SELECT count(*)::int FROM nn_completions
+                WHERE date = (now() AT TIME ZONE $1)::date) AS done`,
+      [tz]
+    ),
+    sql.query(
+      // Computed in SQL: a timestamptz that round-trips through JS Date
+      // parsing loses its year and reports decades of "clean" days.
+      `SELECT (SELECT (now() AT TIME ZONE $1)::date
+                      - (max(occurred_at) AT TIME ZONE $1)::date
+                 FROM reset_events)::int AS days_clean,
+              (SELECT count(*)::int FROM urge_events
+                WHERE occurred_at >= now() - interval '7 days') AS urges_7d`,
+      [tz]
+    ),
+    sql.query(
+      `SELECT (SELECT COALESCE(target_sessions, 4) FROM weekly_targets
+                WHERE week_start = date_trunc('week', now())::date) AS target,
+              (SELECT count(*)::int FROM workouts_manual
+                WHERE date >= date_trunc('week', now())::date) AS sessions`
+    ),
+  ]);
+
   const n = (v) => Number(v ?? 0);
   const totalQuestions = n(study.total_questions);
   const dueReviews = n(study.due_reviews);
@@ -61,6 +86,26 @@ today.get("/", async (c) => {
       answered_today: answeredToday,
       accuracy_7d:
         weekAttempts > 0 ? Math.round((n(study.week_correct) / weekAttempts) * 100) : null,
+    },
+    daily: {
+      // grey until items exist, green when all done, amber while any remain
+      status: n(daily.total) === 0 ? "grey" : n(daily.done) >= n(daily.total) ? "green" : "amber",
+      done: n(daily.done),
+      total: n(daily.total),
+    },
+    reset: {
+      // never red: a reset is data, not a verdict
+      status: rst.days_clean == null ? "grey" : "green",
+      days_clean: rst.days_clean == null ? null : Number(rst.days_clean),
+      urges_7d: n(rst.urges_7d),
+    },
+    training: {
+      status:
+        n(train.sessions) >= n(train.target) ? "green"
+        : n(train.sessions) > 0 ? "amber"
+        : "grey",
+      sessions: n(train.sessions),
+      target: n(train.target) || 4,
     },
   });
 });

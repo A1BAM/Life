@@ -1,8 +1,7 @@
 # Life
 
 Single-user life dashboard on **Cloudflare Workers + Neon**. Phase 1: app shell
-(Today screen, auth, full schema) plus the **study engine** — the only way to
-study is answering NCLEX-style questions generated from your own lecture PDFs.
+(Today screen, auth, full schema) plus the **study engine** — the only way to study is answering questions, never re-reading.
 
 ## Setup
 
@@ -20,7 +19,6 @@ npm run db:seed          # optional: demo course + 5 questions
 # 3. Cloudflare (free plan — no Queues, no cron, no paid features)
 npx wrangler secret put DATABASE_URL
 npx wrangler secret put LIFTLOGIC_DATABASE_URL
-npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler secret put APP_PASSWORD
 npx wrangler secret put SESSION_SECRET      # openssl rand -base64 32
 
@@ -36,16 +34,23 @@ Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
 
 - **Today** — date, exam countdown, study card (status color + one number + one tap).
 - **Study heatmap** — units × courses colored by accuracy; tap a cell to drill it.
-- **Ingest** — pick a lecture PDF; the phone extracts the text and drives
-  generation one chunk at a time. Leave the page and it pauses; reopen the app
-  and it resumes from where it stopped.
+- **Add questions** — type or paste them in a plain format (blank line between
+  questions, `*` marks the right answer). Live preview and per-question errors
+  before anything is saved. No AI, no API key.
 - **Practice** — due reviews first, then unseen, then rotation. Answer → per-option
   rationales. Wrong answers re-queue at 1d/3d/7d; twice-right questions retire.
 - **Courses** — exam registry, weights, scores, and the "what do I need on the
   remaining exams" scenario table.
-- **Training (API only)** — reads workouts live from LiftLogic once
-  `LIFTLOGIC_WORKOUTS_SQL` is set; `/api/training/liftlogic/introspect` reports
-  LiftLogic's real schema so that query can be written correctly.
+- **Daily** — up to 5 non-negotiables, giant tap targets, 90-day dot grid,
+  trailing-30-day rate. No streaks, no guilt copy; an item under 50% for three
+  weeks offers to be fixed or deleted.
+- **Training** — the week as N slots, weekly (never daily) consistency streak,
+  12-week bar. Reads LiftLogic live once `LIFTLOGIC_WORKOUTS_SQL` is set;
+  one-tap push/pull logging until then.
+- **Reset** — days clean, best ever, 90-day dot grid, and the gap trend that
+  actually matters. One-tap urge logging shows the if-then plan you wrote plus a
+  10-minute timer, then an hour×weekday pattern heatmap. No shame mechanics
+  anywhere: no red states, no lost-progress, no required explanation.
 
 ## Docs
 
@@ -56,10 +61,8 @@ Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
 ## Layout
 
 ```
-sql/       001_init.sql (schema) · liftlogic_readonly_role.sql · seed_demo.sql
+sql/       001_init.sql (schema) · 002_no_ai.sql · liftlogic_readonly_role.sql · seed_demo.sql
 worker/    Hono API on Workers
-  routes/  study.js · today.js · training.js
-  ai/      question generation (Anthropic, server-side key)
-  ingest.js  claim-and-generate one chunk per call (no queue, no cron)
+  routes/  study.js · today.js · training.js · nn.js · reset.js
 web/       React + Vite + Tailwind SPA, mobile-first, dark
 ```

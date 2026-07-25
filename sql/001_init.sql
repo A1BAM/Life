@@ -85,37 +85,6 @@ CREATE TABLE IF NOT EXISTS review_queue (
 );
 CREATE INDEX IF NOT EXISTS idx_review_due ON review_queue(due_at);
 
--- ---------- slide ingest (queue-driven) ----------
--- The browser extracts PDF text and posts chunks; the Worker enqueues one
--- message per chunk. Chunk text lives here so a job survives a closed phone.
-CREATE TABLE IF NOT EXISTS ingest_jobs (
-  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  course_id  bigint NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-  unit_id    bigint NOT NULL REFERENCES units(id)   ON DELETE CASCADE,
-  filename   text   NOT NULL,
-  status     text   NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','error')),
-  total_chunks      int NOT NULL DEFAULT 0,
-  done_chunks       int NOT NULL DEFAULT 0,
-  questions_created int NOT NULL DEFAULT 0,
-  error      text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS ingest_chunks (
-  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  job_id     bigint NOT NULL REFERENCES ingest_jobs(id) ON DELETE CASCADE,
-  seq        int    NOT NULL,
-  content    text   NOT NULL,
-  status     text   NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','done','error')),
-  attempts   int    NOT NULL DEFAULT 0,
-  error      text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (job_id, seq)
-);
--- Cron re-drives anything stuck in 'running' or left 'pending'.
-CREATE INDEX IF NOT EXISTS idx_chunks_sweep ON ingest_chunks(status, updated_at);
 
 -- ============================================================
 -- TRAINING (module 4.2) — workouts are READ from LiftLogic's own
@@ -357,7 +326,7 @@ DO $$
 DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
-    'courses','exams','questions','review_queue','ingest_jobs','ingest_chunks',
+    'courses','exams','questions','review_queue',
     'weekly_targets','workouts_manual','matches','if_then_plans','calendar_tokens',
     'licensure_milestones','applications','target_programs','resume_variants',
     'interview_answers','nn_items','grooming_items','recurring_charges',

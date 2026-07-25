@@ -27,8 +27,8 @@ export default function Study() {
           <Link to="/study/courses" className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-300">
             Courses
           </Link>
-          <Link to="/study/ingest" className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-300">
-            Ingest
+          <Link to="/study/add" className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-300">
+            Add
           </Link>
         </div>
       </div>
@@ -42,7 +42,7 @@ export default function Study() {
 
       {heatmap && heatmap.length === 0 && (
         <p className="text-zinc-500 text-sm text-center pt-8">
-          No units yet. Add a course, then ingest a lecture PDF.
+          No questions yet. Add a course, then add some questions.
         </p>
       )}
 

@@ -3,7 +3,7 @@
   "name": "life",
   "main": "worker/index.js",
   "compatibility_date": "2025-01-01",
-  // Required by @anthropic-ai/sdk and @neondatabase/serverless.
+  // Required by @neondatabase/serverless.
   "compatibility_flags": ["nodejs_compat"],
 
   // The SPA is served by this same Worker — no separate Pages project, no CORS,
@@ -27,11 +27,9 @@
   // Non-secret config. Secrets go in via `wrangler secret put` — see docs/DEPLOY.md.
   "vars": {
     "TIMEZONE": "America/New_York"
-    // "ANTHROPIC_MODEL": "claude-opus-5",
     // "LIFTLOGIC_WORKOUTS_SQL": "SELECT ... WHERE d BETWEEN $1 AND $2"
   }
 
-  // Deliberately absent: "queues" (Workers Paid only) and "triggers"/cron —
-  // a recurring cron would poll Neon around the clock and burn the free plan's
-  // compute hours. Generation is client-driven instead; see worker/ingest.js.
+  // Deliberately absent: "queues" and "triggers"/cron. Nothing runs in the
+  // background, so a cron would only poll Neon awake and burn free compute hours.
 }
