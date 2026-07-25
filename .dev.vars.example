@@ -1,0 +1,12 @@
+# Copy to .dev.vars for `wrangler dev`. Gitignored; never deployed.
+# Production values go in via `wrangler secret put` — see docs/DEPLOY.md.
+DATABASE_URL=postgresql://user:pass@ep-xxx-pooler.region.aws.neon.tech/life?sslmode=require
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Read-only role on LiftLogic's Neon DB (sql/liftlogic_readonly_role.sql).
+# Omit to fall back to DATABASE_URL (same database, different schema).
+# LIFTLOGIC_DATABASE_URL=postgresql://life_reader:pass@ep-yyy-pooler.region.aws.neon.tech/liftlogic?sslmode=require
+
+# Omit both locally to disable auth. Both are required for auth to switch on.
+# APP_PASSWORD=
+# SESSION_SECRET=
