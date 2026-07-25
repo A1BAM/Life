@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 
@@ -11,29 +11,63 @@ export default function Ingest() {
   const [phase, setPhase] = useState(null); // {label, pct}
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
+  const running = useRef(false); // one generation loop at a time
+
+  const refreshJobs = useCallback(
+    () => api.get("/study/ingest/jobs").then(setJobs).catch(() => {}),
+    []
+  );
 
   useEffect(() => {
     api.get("/study/courses").then((cs) => {
       setCourses(cs);
       if (cs.length === 1) setCourseId(String(cs[0].id));
     });
-  }, []);
+    refreshJobs();
+  }, [refreshJobs]);
 
+  /**
+   * Generation is driven from here, one chunk per request. There is no server
+   * queue or cron (both cost money or keep the database awake), so this loop is
+   * what makes progress — and it picks up wherever a previous session stopped.
+   */
+  const drive = useCallback(
+    async (jobId = null) => {
+      if (running.current) return;
+      running.current = true;
+      try {
+        for (;;) {
+          const r = await api.post("/study/ingest/step", { job_id: jobId });
+          if (r.done) break;
+          if (r.job) {
+            setPhase({
+              label: `Generating ${r.job.done_chunks}/${r.job.total_chunks}`,
+              pct: Math.round((r.job.done_chunks / Math.max(r.job.total_chunks, 1)) * 100),
+            });
+          }
+          await refreshJobs();
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        running.current = false;
+        setPhase(null);
+        refreshJobs();
+      }
+    },
+    [refreshJobs]
+  );
+
+  // Resume anything left unfinished — a closed tab, a dead connection, a phone
+  // that locked mid-upload.
   useEffect(() => {
-    let timer;
-    let alive = true;
-    const poll = async () => {
-      const j = await api.get("/study/ingest/jobs").catch(() => []);
-      if (!alive) return;
-      setJobs(j);
-      if (j.some((x) => x.status === "running")) timer = setTimeout(poll, 3000);
-    };
-    poll();
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [phase]);
+    api
+      .get("/study/ingest/pending")
+      .then((pending) => {
+        if (pending.length) drive(pending[0].job_id);
+      })
+      .catch(() => {});
+  }, [drive]);
 
   async function submit() {
     if (!courseId || !unitName || !file) return;
@@ -52,8 +86,8 @@ export default function Ingest() {
         return;
       }
 
-      setPhase({ label: `Queueing ${chunks.length} chunks`, pct: 100 });
-      await api.post("/study/ingest", {
+      setPhase({ label: "Uploading text", pct: 100 });
+      const { job_id } = await api.post("/study/ingest", {
         course_id: Number(courseId),
         unit_name: unitName,
         filename: file.name,
@@ -63,12 +97,14 @@ export default function Ingest() {
       setUnitName("");
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
+      await drive(job_id);
     } catch (err) {
       setError(err.message);
-    } finally {
       setPhase(null);
     }
   }
+
+  const busy = Boolean(phase) || running.current;
 
   return (
     <div className="max-w-md mx-auto p-4 space-y-4">
@@ -112,37 +148,22 @@ export default function Ingest() {
         )}
         <button
           onClick={submit}
-          disabled={Boolean(phase) || !courseId || !unitName || !file}
+          disabled={busy || !courseId || !unitName || !file}
           className="w-full bg-emerald-600 disabled:opacity-40 rounded-xl py-3 font-medium"
         >
           Generate questions
         </button>
         <p className="text-zinc-600 text-xs">
-          The PDF is read on this device; only the text is uploaded. Generation runs
-          server-side — you can close this page.
+          The PDF is read on this device; only the text is uploaded. Keep this page
+          open while it generates — if you leave, it picks up where it stopped next
+          time you open it.
         </p>
       </div>
 
       {jobs.length > 0 && (
         <div className="space-y-2">
           {jobs.map((j) => (
-            <div key={j.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-300 truncate mr-2">
-                  {j.unit_name} · {j.filename}
-                </span>
-                <StatusChip job={j} />
-              </div>
-              {j.status === "running" && (
-                <div className="mt-2 h-1.5 bg-zinc-800 rounded overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 transition-all"
-                    style={{ width: `${(j.done_chunks / Math.max(j.total_chunks, 1)) * 100}%` }}
-                  />
-                </div>
-              )}
-              {j.error && <div className="text-amber-400 text-xs mt-1">{j.error}</div>}
-            </div>
+            <JobRow key={j.id} job={j} onResume={() => drive(j.id)} busy={busy} />
           ))}
         </div>
       )}
@@ -150,13 +171,38 @@ export default function Ingest() {
   );
 }
 
-function StatusChip({ job }) {
-  if (job.status === "done")
-    return <span className="text-emerald-400 text-xs">{job.questions_created} questions</span>;
-  if (job.status === "error") return <span className="text-red-400 text-xs">failed</span>;
+function JobRow({ job, onResume, busy }) {
+  const stalled = job.status === "running" && !busy;
   return (
-    <span className="text-amber-400 text-xs">
-      {job.done_chunks}/{job.total_chunks}
-    </span>
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-sm">
+      <div className="flex items-center justify-between">
+        <span className="text-zinc-300 truncate mr-2">
+          {job.unit_name} · {job.filename}
+        </span>
+        {job.status === "done" ? (
+          <span className="text-emerald-400 text-xs">{job.questions_created} questions</span>
+        ) : job.status === "error" ? (
+          <span className="text-red-400 text-xs">failed</span>
+        ) : (
+          <span className="text-amber-400 text-xs">
+            {job.done_chunks}/{job.total_chunks}
+          </span>
+        )}
+      </div>
+      {job.status === "running" && (
+        <div className="mt-2 h-1.5 bg-zinc-800 rounded overflow-hidden">
+          <div
+            className="h-full bg-emerald-500 transition-all"
+            style={{ width: `${(job.done_chunks / Math.max(job.total_chunks, 1)) * 100}%` }}
+          />
+        </div>
+      )}
+      {stalled && (
+        <button onClick={onResume} className="text-emerald-400 text-xs mt-2">
+          Resume →
+        </button>
+      )}
+      {job.error && <div className="text-amber-400 text-xs mt-1">{job.error}</div>}
+    </div>
   );
 }

@@ -9,7 +9,6 @@ import {
   safeEqual,
   verifyToken,
 } from "./auth.js";
-import { processChunk, sweepStuckChunks } from "./ingest.js";
 import study from "./routes/study.js";
 import today from "./routes/today.js";
 import training from "./routes/training.js";
@@ -60,26 +59,4 @@ app.onError((err, c) => {
   return c.json({ error: err?.message || "internal error" }, 500);
 });
 
-export default {
-  fetch: app.fetch,
-
-  // One message per lecture chunk. Failures throw so the queue retries with
-  // backoff; the third attempt is recorded on the chunk and the job moves on.
-  async queue(batch, env) {
-    for (const msg of batch.messages) {
-      try {
-        await processChunk(env, msg.body.chunk_id);
-        msg.ack();
-      } catch (err) {
-        console.error("chunk failed", msg.body?.chunk_id, err?.message);
-        msg.retry({ delaySeconds: 30 });
-      }
-    }
-  },
-
-  // Safety net: re-drive chunks the queue never took (unbound queue) or that
-  // died mid-flight.
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(sweepStuckChunks(env));
-  },
-};
+export default { fetch: app.fetch };

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db.js";
+import { processNextChunk } from "../ingest.js";
 
 const study = new Hono();
 
@@ -349,22 +350,34 @@ study.post("/ingest", async (c) => {
     [job.id, chunks]
   );
 
-  await enqueueChunks(c.env, job.id, inserted);
-  return c.json({ job_id: job.id, total_chunks: chunks.length });
+  return c.json({ job_id: job.id, total_chunks: inserted.length });
 });
 
-/** Queue one message per chunk; fall back to inline processing when unbound. */
-export async function enqueueChunks(env, jobId, chunks) {
-  if (env.INGEST_QUEUE) {
-    for (let i = 0; i < chunks.length; i += 100) {
-      await env.INGEST_QUEUE.sendBatch(
-        chunks.slice(i, i + 100).map((ch) => ({ body: { job_id: jobId, chunk_id: ch.id } }))
-      );
-    }
-    return;
-  }
-  // No queue bound (local dev / free plan): the cron sweep picks these up.
-  console.warn("INGEST_QUEUE not bound — chunks left pending for the cron sweep");
-}
+// Generate questions for one chunk. The client calls this repeatedly while the
+// app is open; each call is a single Anthropic request, which keeps every
+// invocation well inside the free plan's subrequest and CPU budgets.
+study.post("/ingest/step", async (c) => {
+  if (!c.env.ANTHROPIC_API_KEY)
+    return c.json({ error: "ANTHROPIC_API_KEY is not configured" }, 503);
+  const body = await c.req.json().catch(() => ({}));
+  return c.json(await processNextChunk(c.env, body.job_id ?? null));
+});
+
+// Any job with work left, so the app can resume one it didn't finish.
+study.get("/ingest/pending", async (c) => {
+  const rows = await db(c.env).query(
+    `SELECT j.id AS job_id, j.status, j.done_chunks, j.total_chunks, j.questions_created,
+            u.name AS unit_name, j.filename,
+            count(ch.id) FILTER (WHERE ch.status IN ('pending','running')) AS remaining
+       FROM ingest_jobs j
+       JOIN units u ON u.id = j.unit_id
+       LEFT JOIN ingest_chunks ch ON ch.job_id = j.id
+      WHERE j.status = 'running'
+      GROUP BY j.id, u.name
+     HAVING count(ch.id) FILTER (WHERE ch.status IN ('pending','running')) > 0
+      ORDER BY j.created_at`
+  );
+  return c.json(rows.map((r) => ({ ...r, remaining: Number(r.remaining) })));
+});
 
 export default study;

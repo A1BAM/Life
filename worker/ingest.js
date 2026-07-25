@@ -2,22 +2,39 @@ import { db } from "./db.js";
 import { generateFromChunk } from "./ai/generate.js";
 
 const MAX_ATTEMPTS = 3;
+// A chunk left 'running' this long is assumed abandoned (tab closed, request
+// timed out) and becomes claimable again.
+const STALE = "2 minutes";
 
 /**
- * Generate questions for a single chunk and fold the result into its job.
- * Claims the chunk first so a cron sweep and a queue retry can't double-run it.
+ * Claim exactly one chunk and generate its questions.
+ *
+ * Pull-based on purpose: Cloudflare Queues is a paid feature, and a frequent
+ * cron would keep the Neon instance awake around the clock and burn the free
+ * plan's compute hours. Instead the client calls this once per chunk while the
+ * app is open, and any chunk left behind is picked up the next time it opens.
+ *
+ * Returns { done: true } when there is nothing left to process.
  */
-export async function processChunk(env, chunkId) {
+export async function processNextChunk(env, jobId = null) {
   const sql = db(env);
 
+  // Atomic claim: the subquery takes a row lock and skips rows another caller
+  // already holds, so two tabs can't process the same chunk.
   const [chunk] = await sql.query(
-    `UPDATE ingest_chunks
-        SET status = 'running', attempts = attempts + 1
-      WHERE id = $1 AND status IN ('pending','running')
+    `UPDATE ingest_chunks SET status = 'running', attempts = attempts + 1
+      WHERE id = (
+        SELECT id FROM ingest_chunks
+         WHERE ($1::bigint IS NULL OR job_id = $1)
+           AND (status = 'pending'
+                OR (status = 'running' AND updated_at < now() - interval '${STALE}'))
+         ORDER BY (status = 'running') DESC, seq
+         LIMIT 1 FOR UPDATE SKIP LOCKED
+      )
       RETURNING *`,
-    [chunkId]
+    [jobId]
   );
-  if (!chunk) return; // already done, or claimed elsewhere
+  if (!chunk) return { done: true };
 
   const [ctx] = await sql.query(
     `SELECT c.name AS course_name, u.name AS unit_name, j.course_id, j.unit_id
@@ -27,7 +44,7 @@ export async function processChunk(env, chunkId) {
       WHERE j.id = $1`,
     [chunk.job_id]
   );
-  if (!ctx) return;
+  if (!ctx) return { done: true };
 
   try {
     const questions = await generateFromChunk(env, chunk.content, {
@@ -46,22 +63,26 @@ export async function processChunk(env, chunkId) {
       );
     }
 
-    await sql.query(
+    const [job] = await sql.query(
       `WITH done AS (
-         UPDATE ingest_chunks SET status = 'done', error = NULL WHERE id = $1 RETURNING job_id
+         UPDATE ingest_chunks SET status = 'done', error = NULL
+          WHERE id = $1 RETURNING job_id
        )
        UPDATE ingest_jobs j
           SET done_chunks       = done_chunks + 1,
               questions_created = questions_created + $2,
               status = CASE WHEN done_chunks + 1 >= total_chunks THEN 'done' ELSE status END
-        FROM done WHERE j.id = done.job_id`,
-      [chunkId, questions.length]
+         FROM done WHERE j.id = done.job_id
+       RETURNING j.id, j.status, j.done_chunks, j.total_chunks, j.questions_created`,
+      [chunk.id, questions.length]
     );
+
+    return { done: false, job, questions_created: questions.length };
   } catch (err) {
     const message = String(err?.message || err).slice(0, 500);
-    const giveUp = chunk.attempts + 1 >= MAX_ATTEMPTS;
+    const giveUp = chunk.attempts >= MAX_ATTEMPTS;
 
-    await sql.query(
+    const [job] = await sql.query(
       `WITH upd AS (
          UPDATE ingest_chunks
             SET status = CASE WHEN $3::boolean THEN 'error' ELSE 'pending' END,
@@ -75,33 +96,13 @@ export async function processChunk(env, chunkId) {
                 WHEN done_chunks + CASE WHEN upd.status = 'error' THEN 1 ELSE 0 END >= total_chunks
                 THEN CASE WHEN questions_created > 0 THEN 'done' ELSE 'error' END
                 ELSE j.status END
-        FROM upd WHERE j.id = upd.job_id`,
-      [chunkId, message, giveUp]
+         FROM upd WHERE j.id = upd.job_id
+       RETURNING j.id, j.status, j.done_chunks, j.total_chunks, j.questions_created`,
+      [chunk.id, message, giveUp]
     );
 
-    if (!giveUp) throw err; // let the queue retry with backoff
+    // Not fatal to the run — the client keeps stepping and this chunk either
+    // retries or is already recorded as failed.
+    return { done: false, job, error: message, gave_up: giveUp };
   }
-}
-
-/**
- * Cron safety net: re-drive chunks left pending (no queue bound) or stuck
- * running (a Worker died mid-chunk).
- */
-export async function sweepStuckChunks(env, limit = 25) {
-  const sql = db(env);
-  const stuck = await sql.query(
-    `SELECT id FROM ingest_chunks
-      WHERE (status = 'pending')
-         OR (status = 'running' AND updated_at < now() - interval '10 minutes')
-      ORDER BY updated_at LIMIT $1`,
-    [limit]
-  );
-  for (const { id } of stuck) {
-    try {
-      await processChunk(env, id);
-    } catch {
-      // already recorded on the chunk row; keep sweeping
-    }
-  }
-  return stuck.length;
 }

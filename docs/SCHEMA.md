@@ -16,7 +16,7 @@ The file is idempotent — re-running it is safe.
 | `question_attempts` | every answer ever | feeds accuracy, heatmap, weekly review |
 | `review_queue` | spaced repetition | `stage` 0/1/2 = 1d/3d/7d; row deleted on retirement |
 | `ingest_jobs` | one per uploaded lecture | progress counters polled by the ingest screen |
-| `ingest_chunks` | chunk text + per-chunk state | makes a job durable across a closed phone; `pending`/`running`/`done`/`error` with an attempt counter |
+| `ingest_chunks` | chunk text + per-chunk state | makes a job resumable after a closed tab; `pending`/`running`/`done`/`error` with an attempt counter. Claimed atomically via `UPDATE … FOR UPDATE SKIP LOCKED`, so concurrent tabs can't duplicate work |
 | `weekly_targets` | training targets (4.2) | per-day intent as `jsonb` |
 | `workouts_manual` | the "trained today" fallback | LiftLogic sessions are **read live**, never copied here |
 
@@ -71,4 +71,6 @@ practice selection priority (due → unseen → rotation → recycled), the unit
 filter, the heatmap aggregate, the grade-scenario aggregate, timezone-aware
 "today" counts, exam-score preserve/set/clear, chunk claiming (double-claim is a
 no-op), the retry-vs-give-up error paths, the stuck-chunk sweep, both `questions`
-check constraints, and cascade deletes.
+check constraints, and cascade deletes — plus the atomic chunk claim (sequential
+claims never collide, a stale `running` chunk is reclaimed and prioritised over
+pending ones, and job scoping works).

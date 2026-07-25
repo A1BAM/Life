@@ -3,14 +3,18 @@
   "name": "life",
   "main": "worker/index.js",
   "compatibility_date": "2025-01-01",
-  // nodejs_compat is required by @anthropic-ai/sdk and @neondatabase/serverless.
+  // Required by @anthropic-ai/sdk and @neondatabase/serverless.
   "compatibility_flags": ["nodejs_compat"],
 
-  // Static assets are served directly; anything without a matching file falls
-  // through to the Worker, which returns the SPA shell in place.
-  // Both flags are off deliberately: "single-page-application" not_found mode
-  // and the default html_handling each 307-redirect deep links to /, which
-  // drops the route on a bookmark or refresh. Verified against workerd.
+  // The SPA is served by this same Worker — no separate Pages project, no CORS,
+  // one deploy. Static asset requests are free and don't count against the
+  // Workers free plan's daily request budget.
+  //
+  // Both handling flags are off deliberately: "single-page-application"
+  // not_found mode and the default html_handling each 307-redirect a deep link
+  // to /, which drops the route on a bookmark or refresh. With them off, an
+  // unmatched path falls through to the Worker, which returns the shell in
+  // place. Verified against workerd.
   "assets": {
     "directory": "./web/dist",
     "binding": "ASSETS",
@@ -25,23 +29,9 @@
     "TIMEZONE": "America/New_York"
     // "ANTHROPIC_MODEL": "claude-opus-5",
     // "LIFTLOGIC_WORKOUTS_SQL": "SELECT ... WHERE d BETWEEN $1 AND $2"
-  },
+  }
 
-  // Durable background generation. Requires the Workers Paid plan; without it,
-  // remove this block — the cron sweep below still processes chunks, just slower.
-  "queues": {
-    "producers": [{ "queue": "life-ingest", "binding": "INGEST_QUEUE" }],
-    "consumers": [
-      {
-        "queue": "life-ingest",
-        "max_batch_size": 1,
-        "max_concurrency": 3,
-        "max_retries": 3,
-        "retry_delay": 30
-      }
-    ]
-  },
-
-  // Re-drives stuck or unqueued chunks.
-  "triggers": { "crons": ["*/2 * * * *"] }
+  // Deliberately absent: "queues" (Workers Paid only) and "triggers"/cron —
+  // a recurring cron would poll Neon around the clock and burn the free plan's
+  // compute hours. Generation is client-driven instead; see worker/ingest.js.
 }

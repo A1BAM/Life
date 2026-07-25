@@ -12,7 +12,7 @@ change — flag anything wrong in review and it gets swapped.
 | Frontend | React + Vite + Tailwind, served as static assets by the same Worker | One deploy, one origin, no CORS |
 | Auth | Single password → HMAC-signed cookie (WebCrypto) | Stateless: no session table, no DB round trip per request. Auth switches on only when `APP_PASSWORD` **and** `SESSION_SECRET` are both set |
 | AI | Anthropic API, `claude-opus-5`, key server-side only | Structured outputs (JSON schema) guarantee parseable question JSON |
-| Hosting | Cloudflare Workers + a custom domain | Replaces the earlier self-hosted-Docker plan |
+| Hosting | Cloudflare Workers, **free plan**, one Worker serving both API and SPA | Replaces the earlier self-hosted-Docker plan. No separate Pages project: Workers serves static assets natively, asset requests are free and don't count against the daily request budget, and one origin means no CORS to configure |
 
 ### Why the runtime changed with the database
 
@@ -23,15 +23,31 @@ things from the first pass:
   deck is a large multipart upload. pdf.js now extracts text on the phone and
   posts only the text — the 1.3 MB pdf.js bundle is lazy-loaded so it never
   touches the Today screen.
-- **Background generation moved to a queue.** A Worker cannot keep working after
-  the response is sent, so chunk text is persisted (`ingest_chunks`) and one
-  Cloudflare Queue message is sent per chunk. The job survives a locked phone.
-  A 2-minute cron re-drives anything stuck. Without the Paid plan, drop the
-  `queues` block and the cron alone does the work, slower.
+- **Background generation became client-driven.** A Worker can't keep working
+  after the response is sent, and the two server-side answers are both blocked on
+  the free plan: Cloudflare Queues is paid-only, and a polling cron would hold
+  the Neon instance awake around the clock and burn its monthly compute-hour
+  allowance. So chunk text is persisted (`ingest_chunks`) and the browser calls
+  `POST /api/study/ingest/step` once per chunk. Claiming is atomic (a single
+  `UPDATE … FOR UPDATE SKIP LOCKED`), so two open tabs can't duplicate work, and
+  a chunk left `running` for two minutes becomes claimable again. Leaving the
+  page pauses a job rather than losing it — reopening the app resumes it.
+  The accepted trade: an unfinished deck waits for you instead of finishing on
+  its own.
 - **Transactions became CTEs.** Neon's HTTP driver has no interactive
   transactions, so recording an attempt (grade → log → update streak → move the
   SRS queue) is one statement with mutually-exclusive data-modifying CTEs. One
   round trip, still atomic.
+
+### Free-plan constraints the design accounts for
+
+| Constraint | Consequence |
+|---|---|
+| Cloudflare Queues is paid-only | Generation is client-driven, one chunk per request |
+| A cron would hold Neon open 24/7 and drain its compute-hour allowance | No cron at all — the database is touched only while the app is in use |
+| Neon autosuspends when idle | The first request after a gap takes roughly half a second |
+| Cloudflare cuts a request at ~100s | A slow chunk fails, returns to `pending`, and retries (3 attempts). `ANTHROPIC_MODEL` can be pointed at a faster model if it recurs |
+| 100k Worker requests/day | Not a factor: a 250-slide deck costs ~20 requests, a practice answer costs 1, static assets are free |
 
 ## LiftLogic (spec §4.2)
 
