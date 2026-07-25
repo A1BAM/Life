@@ -24,13 +24,9 @@ npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler secret put APP_PASSWORD
 npx wrangler secret put SESSION_SECRET      # openssl rand -base64 32
 
-# 4. Deploy: push to main and GitHub Actions ships it.
-#    Add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID as GitHub secrets first.
-git push
+npm install && npm run deploy
 ```
 
-Deploying by hand still works (`npm install && npm run deploy`), and Cloudflare's
-own Git integration is supported too — both covered in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
 `npx wrangler dev` for the API on :8787 and `cd web && npm run dev` for the UI on
@@ -60,7 +56,6 @@ Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
 ## Layout
 
 ```
-.github/   deploy.yml — build + validate on PRs, deploy on push to main
 sql/       001_init.sql (schema) · liftlogic_readonly_role.sql · seed_demo.sql
 worker/    Hono API on Workers
   routes/  study.js · today.js · training.js

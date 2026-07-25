@@ -39,20 +39,6 @@ things from the first pass:
   SRS queue) is one statement with mutually-exclusive data-modifying CTEs. One
   round trip, still atomic.
 
-### Delivery
-
-GitHub is the source of truth: pushing to `main` builds and deploys via
-`.github/workflows/deploy.yml`, and every pull request is built and has its
-Worker bundle validated (`wrangler deploy --dry-run`) without deploying, so a
-broken config fails on the PR rather than in production. No Docker, no build
-step on your machine. Cloudflare's own Git integration works as an alternative —
-the root `build` script installs the nested `web/` dependencies itself, so a
-clean checkout builds either way.
-
-The two GitHub secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) are
-deploy credentials only. The five runtime secrets live on the Worker, set once
-with `wrangler secret put`, and survive deploys — they never enter GitHub.
-
 ### Free-plan constraints the design accounts for
 
 | Constraint | Consequence |
