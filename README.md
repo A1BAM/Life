@@ -41,9 +41,16 @@ Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
   rationales. Wrong answers re-queue at 1d/3d/7d; twice-right questions retire.
 - **Courses** — exam registry, weights, scores, and the "what do I need on the
   remaining exams" scenario table.
-- **Training (API only)** — reads workouts live from LiftLogic once
-  `LIFTLOGIC_WORKOUTS_SQL` is set; `/api/training/liftlogic/introspect` reports
-  LiftLogic's real schema so that query can be written correctly.
+- **Daily** — up to 5 non-negotiables, giant tap targets, 90-day dot grid,
+  trailing-30-day rate. No streaks, no guilt copy; an item under 50% for three
+  weeks offers to be fixed or deleted.
+- **Training** — the week as N slots, weekly (never daily) consistency streak,
+  12-week bar. Reads LiftLogic live once `LIFTLOGIC_WORKOUTS_SQL` is set;
+  one-tap push/pull logging until then.
+- **Reset** — days clean, best ever, 90-day dot grid, and the gap trend that
+  actually matters. One-tap urge logging shows the if-then plan you wrote plus a
+  10-minute timer, then an hour×weekday pattern heatmap. No shame mechanics
+  anywhere: no red states, no lost-progress, no required explanation.
 
 ## Docs
 
@@ -56,6 +63,6 @@ Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
 ```
 sql/       001_init.sql (schema) · 002_no_ai.sql · liftlogic_readonly_role.sql · seed_demo.sql
 worker/    Hono API on Workers
-  routes/  study.js · today.js · training.js
+  routes/  study.js · today.js · training.js · nn.js · reset.js
 web/       React + Vite + Tailwind SPA, mobile-first, dark
 ```

@@ -139,5 +139,32 @@ training.put("/target", async (c) => {
   return c.json(rows[0]);
 });
 
+// Consistency streak counts WEEKS that hit target, never days — daily streaks
+// punish rest days and clinical shifts (spec 4.2.3).
+training.get("/streak", async (c) => {
+  const sql = db(c.env);
+  const weeks = await sql.query(
+    `SELECT (date_trunc('week', d)::date)::text AS week_start,
+            COALESCE(t.target_sessions, 4) AS target,
+            count(w.id)::int AS sessions
+       FROM generate_series(date_trunc('week', now()) - interval '11 weeks',
+                            date_trunc('week', now()), interval '1 week') AS d
+       LEFT JOIN weekly_targets t ON t.week_start = date_trunc('week', d)::date
+       LEFT JOIN workouts_manual w
+              ON w.date >= date_trunc('week', d)::date
+             AND w.date <  date_trunc('week', d)::date + 7
+      GROUP BY d, t.target_sessions
+      ORDER BY d DESC`
+  );
+
+  // Only whole weeks count; the current one is still in progress.
+  let streak = 0;
+  for (const w of weeks.slice(1)) {
+    if (Number(w.sessions) >= Number(w.target)) streak++;
+    else break;
+  }
+  return c.json({ streak_weeks: streak, weeks: weeks.reverse() });
+});
+
 export default training;
 export { readLiftlogicWorkouts };

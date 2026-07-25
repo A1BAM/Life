@@ -17,6 +17,8 @@ The file is idempotent — re-running it is safe.
 | `review_queue` | spaced repetition | `stage` 0/1/2 = 1d/3d/7d; row deleted on retirement |
 | `weekly_targets` | training targets (4.2) | per-day intent as `jsonb` |
 | `workouts_manual` | the "trained today" fallback | LiftLogic sessions are **read live**, never copied here |
+| `nn_items` / `nn_completions` | daily non-negotiables (4.8) | 5-item cap enforced in the API, not the schema; a completion row's existence *is* the tick |
+| `urge_events` / `reset_events` / `if_then_plans` | relapse tracker (4.5) | urges store time + tag only; resets store nothing beyond the timestamp unless you volunteer it |
 
 There is no `sessions` table — the login cookie is an HMAC-signed expiry stamp,
 so auth costs no database round trip.
@@ -27,10 +29,8 @@ so auth costs no database round trip.
 |---|---|
 | Dating (4.1) | `matches`, `messages`, `confidence_reps`, `confidence_rep_completions` |
 | Calendar (4.4) | `calendar_tokens` |
-| Relapse (4.5) | `urge_events` (tag + time only), `reset_events` (everything past the timestamp optional), `if_then_plans` |
 | Licensure (4.6) | `licensure_milestones` |
 | Jobs (4.7) | `applications`, `target_programs`, `resume_variants`, `interview_answers` |
-| Non-negotiables (4.8) | `nn_items` (the 3–5 cap is a UI rule, not a constraint), `nn_completions` |
 | Grooming (4.9) | `grooming_items` |
 | Money (4.10) | `recurring_charges`, `ledger_entries` |
 | Home lab (4.12) | `services`, `health_checks` |
