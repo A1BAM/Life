@@ -2,20 +2,23 @@
   "name": "life",
   "version": "0.1.0",
   "private": true,
-  "description": "Single-user life dashboard: study engine, today screen, and (eventually) the rest",
-  "main": "server/index.js",
+  "description": "Single-user life dashboard on Cloudflare Workers + Neon",
+  "main": "worker/index.js",
   "scripts": {
-    "dev": "node --watch server/index.js",
-    "start": "NODE_ENV=production node server/index.js",
-    "seed:demo": "node server/seed-demo.js",
-    "build:web": "cd web && npm run build"
+    "dev": "wrangler dev",
+    "build": "cd web && npm run build",
+    "deploy": "npm run build && wrangler deploy",
+    "db:init": "psql \"$DATABASE_URL\" -f sql/001_init.sql",
+    "db:seed": "psql \"$DATABASE_URL\" -f sql/seed_demo.sql",
+    "tail": "wrangler tail"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
-    "better-sqlite3": "^11.8.0",
-    "cookie-parser": "^1.4.7",
-    "express": "^4.21.0",
-    "multer": "^1.4.5-lts.1",
-    "pdf-parse": "^1.1.1"
-  }
+    "@neondatabase/serverless": "^1.1.0",
+    "hono": "^4.12.32"
+  },
+  "devDependencies": {
+    "wrangler": "^4.114.0"
+  },
+  "type": "module"
 }

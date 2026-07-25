@@ -1,51 +1,64 @@
 # Life
 
-Single-user life dashboard. Phase 1: app shell (Today screen, auth, full DB schema)
-plus the **study engine** — the only way to study is answering NCLEX-style questions
-generated from your own lecture PDFs.
+Single-user life dashboard on **Cloudflare Workers + Neon**. Phase 1: app shell
+(Today screen, auth, full schema) plus the **study engine** — the only way to
+study is answering NCLEX-style questions generated from your own lecture PDFs.
 
-## Run it
+## Setup
 
-```sh
-cp .env.example .env        # set APP_PASSWORD and ANTHROPIC_API_KEY
-docker compose up -d --build
-# → http://<box>:3001
-```
-
-Dev (two terminals):
+Full walkthrough in **[docs/DEPLOY.md](docs/DEPLOY.md)**. Short version:
 
 ```sh
-npm install && npm run dev          # API on :3001
-cd web && npm install && npm run dev  # Vite on :5173, proxies /api
+# 1. Neon: create the database, run the schema
+export DATABASE_URL='postgresql://…-pooler.…neon.tech/life?sslmode=require'
+npm run db:init
+npm run db:seed          # optional: demo course + 5 questions
+
+# 2. Neon: give Life read-only access to LiftLogic
+#    run sql/liftlogic_readonly_role.sql against the LiftLogic database
+
+# 3. Cloudflare
+npx wrangler queues create life-ingest      # Workers Paid plan
+npx wrangler secret put DATABASE_URL
+npx wrangler secret put LIFTLOGIC_DATABASE_URL
+npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler secret put APP_PASSWORD
+npx wrangler secret put SESSION_SECRET      # openssl rand -base64 32
+
+npm install && npm run deploy
 ```
 
-No `APP_PASSWORD` set → auth is disabled (dev mode, logs a warning).
-No `ANTHROPIC_API_KEY` → everything works except question generation.
-`npm run seed:demo` loads a sample course + 5 questions to try the practice flow.
+Local dev: put the same values in `.dev.vars` (see `.dev.vars.example`), then
+`npx wrangler dev` for the API on :8787 and `cd web && npm run dev` for the UI on
+:5173. Omit `APP_PASSWORD`/`SESSION_SECRET` locally to skip the login screen.
 
 ## What works now
 
-- **Today** — date, exam countdown, study module card (status color + one number + one tap).
+- **Today** — date, exam countdown, study card (status color + one number + one tap).
 - **Study heatmap** — units × courses colored by accuracy; tap a cell to drill it.
-- **Ingest** — upload a lecture PDF, pick course + unit, questions generate in the
-  background (progress bar; job survives page closes).
+- **Ingest** — pick a lecture PDF; the phone extracts the text, the server
+  generates questions in the background. Close the page, it keeps going.
 - **Practice** — due reviews first, then unseen, then rotation. Answer → per-option
   rationales. Wrong answers re-queue at 1d/3d/7d; twice-right questions retire.
 - **Courses** — exam registry, weights, scores, and the "what do I need on the
   remaining exams" scenario table.
+- **Training (API only)** — reads workouts live from LiftLogic once
+  `LIFTLOGIC_WORKOUTS_SQL` is set; `/api/training/liftlogic/introspect` reports
+  LiftLogic's real schema so that query can be written correctly.
 
 ## Docs
 
+- [docs/DEPLOY.md](docs/DEPLOY.md) — Neon setup, every Cloudflare secret, LiftLogic wiring.
 - [docs/DECISIONS.md](docs/DECISIONS.md) — every `[FILL IN]` from the spec and what was chosen.
-- [docs/SCHEMA.md](docs/SCHEMA.md) — full data model (all modules), implemented in
-  `server/migrations/001_init.sql`.
+- [docs/SCHEMA.md](docs/SCHEMA.md) — the data model, implemented in `sql/001_init.sql`.
 
 ## Layout
 
 ```
-server/          Express API (CommonJS)
-  migrations/    SQL, applied at boot
-  routes/        study.js (vertical slice), today.js
-  ai/            question generation (Anthropic API, server-side key)
-web/             React + Vite + Tailwind SPA, mobile-first, dark
+sql/       001_init.sql (schema) · liftlogic_readonly_role.sql · seed_demo.sql
+worker/    Hono API on Workers
+  routes/  study.js · today.js · training.js
+  ai/      question generation (Anthropic, server-side key)
+  ingest.js  queue consumer + stuck-chunk sweep
+web/       React + Vite + Tailwind SPA, mobile-first, dark
 ```

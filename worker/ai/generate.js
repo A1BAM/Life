@@ -1,13 +1,6 @@
-const Anthropic = require("@anthropic-ai/sdk");
+import Anthropic from "@anthropic-ai/sdk";
 
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
-
-let client = null;
-function getClient() {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  if (!client) client = new Anthropic();
-  return client;
-}
+const DEFAULT_MODEL = "claude-opus-5";
 
 const NCLEX_CATEGORIES = [
   "Management of Care",
@@ -30,7 +23,7 @@ const OUTPUT_SCHEMA = {
         properties: {
           topic: {
             type: "string",
-            description: "Short topic label for this question, e.g. 'DKA management'",
+            description: "Short topic label, e.g. 'DKA management'",
           },
           nclex_category: { type: "string", enum: NCLEX_CATEGORIES },
           stem: { type: "string" },
@@ -64,15 +57,15 @@ Rules:
 - Generate 5 to 7 questions per chunk if the content supports it; fewer is fine for thin content.`;
 
 /**
- * Generate NCLEX-style questions from one chunk of lecture text.
- * Returns an array of validated question objects (may be empty).
+ * Generate questions from one chunk of lecture text.
+ * Returns validated question objects (possibly empty).
  */
-async function generateFromChunk(chunkText, { courseName, unitName }) {
-  const c = getClient();
-  if (!c) throw new Error("ANTHROPIC_API_KEY is not set");
+export async function generateFromChunk(env, chunkText, { courseName, unitName }) {
+  if (!env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured");
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
-  const stream = c.messages.stream({
-    model: MODEL,
+  const msg = await client.messages.create({
+    model: env.ANTHROPIC_MODEL || DEFAULT_MODEL,
     max_tokens: 16000,
     system: SYSTEM_PROMPT,
     output_config: { format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
@@ -83,15 +76,9 @@ async function generateFromChunk(chunkText, { courseName, unitName }) {
       },
     ],
   });
-  const msg = await stream.finalMessage();
 
-  if (msg.stop_reason === "refusal") {
-    throw new Error("model declined this chunk (safety refusal)");
-  }
-  if (msg.stop_reason === "max_tokens") {
-    // Truncated JSON is unusable; treat as a failed chunk rather than half-parsing.
-    throw new Error("output truncated at max_tokens");
-  }
+  if (msg.stop_reason === "refusal") throw new Error("model declined this chunk");
+  if (msg.stop_reason === "max_tokens") throw new Error("output truncated at max_tokens");
 
   const text = msg.content.find((b) => b.type === "text")?.text ?? "";
   const parsed = JSON.parse(text);
@@ -108,20 +95,4 @@ async function generateFromChunk(chunkText, { courseName, unitName }) {
   );
 }
 
-/** Split extracted PDF text into generator-sized chunks (~8k chars, break on paragraph). */
-function chunkText(text, target = 8000) {
-  const paras = text.split(/\n{2,}/);
-  const chunks = [];
-  let cur = "";
-  for (const p of paras) {
-    if (cur.length + p.length > target && cur.trim().length > 500) {
-      chunks.push(cur);
-      cur = "";
-    }
-    cur += p + "\n\n";
-  }
-  if (cur.trim().length > 200) chunks.push(cur);
-  return chunks;
-}
-
-module.exports = { generateFromChunk, chunkText, NCLEX_CATEGORIES, hasKey: () => Boolean(process.env.ANTHROPIC_API_KEY) };
+export { NCLEX_CATEGORIES };

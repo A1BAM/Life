@@ -8,7 +8,7 @@ export default function Ingest() {
   const [courseId, setCourseId] = useState("");
   const [unitName, setUnitName] = useState("");
   const [file, setFile] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState(null); // {label, pct}
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
 
@@ -19,37 +19,54 @@ export default function Ingest() {
     });
   }, []);
 
-  // poll jobs while any is running
   useEffect(() => {
     let timer;
+    let alive = true;
     const poll = async () => {
       const j = await api.get("/study/ingest/jobs").catch(() => []);
+      if (!alive) return;
       setJobs(j);
-      if (j.some((x) => x.status === "running" || x.status === "queued")) {
-        timer = setTimeout(poll, 2500);
-      }
+      if (j.some((x) => x.status === "running")) timer = setTimeout(poll, 3000);
     };
     poll();
-    return () => clearTimeout(timer);
-  }, [busy]);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [phase]);
 
   async function submit() {
     if (!courseId || !unitName || !file) return;
-    setBusy(true);
     setError(null);
     try {
-      const fd = new FormData();
-      fd.append("course_id", courseId);
-      fd.append("unit_name", unitName);
-      fd.append("file", file);
-      await api.post("/study/ingest", fd);
+      // pdf.js is ~1.3MB — loaded only when a PDF is actually ingested.
+      const { extractText, chunkPages } = await import("../pdf");
+      setPhase({ label: "Reading PDF", pct: 0 });
+      const pages = await extractText(file, (done, total) =>
+        setPhase({ label: "Reading PDF", pct: Math.round((done / total) * 100) })
+      );
+      const chunks = chunkPages(pages);
+      if (!chunks.length) {
+        setError("No text found — this looks like a scanned PDF.");
+        setPhase(null);
+        return;
+      }
+
+      setPhase({ label: `Queueing ${chunks.length} chunks`, pct: 100 });
+      await api.post("/study/ingest", {
+        course_id: Number(courseId),
+        unit_name: unitName,
+        filename: file.name,
+        chunks,
+      });
+
       setUnitName("");
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setPhase(null);
     }
   }
 
@@ -68,9 +85,7 @@ export default function Ingest() {
         >
           <option value="">Course…</option>
           {courses.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.code || c.name}
-            </option>
+            <option key={c.id} value={c.id}>{c.code || c.name}</option>
           ))}
         </select>
         <input
@@ -87,13 +102,25 @@ export default function Ingest() {
           className="w-full text-sm text-zinc-400 file:bg-zinc-800 file:border-0 file:rounded-lg file:px-3 file:py-2 file:text-zinc-300 file:mr-3"
         />
         {error && <p className="text-red-400 text-sm">{error}</p>}
+        {phase && (
+          <div>
+            <div className="text-zinc-400 text-xs mb-1">{phase.label}…</div>
+            <div className="h-1.5 bg-zinc-800 rounded overflow-hidden">
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${phase.pct}%` }} />
+            </div>
+          </div>
+        )}
         <button
           onClick={submit}
-          disabled={busy || !courseId || !unitName || !file}
+          disabled={Boolean(phase) || !courseId || !unitName || !file}
           className="w-full bg-emerald-600 disabled:opacity-40 rounded-xl py-3 font-medium"
         >
-          {busy ? "Uploading…" : "Generate questions"}
+          Generate questions
         </button>
+        <p className="text-zinc-600 text-xs">
+          The PDF is read on this device; only the text is uploaded. Generation runs
+          server-side — you can close this page.
+        </p>
       </div>
 
       {jobs.length > 0 && (
@@ -114,9 +141,7 @@ export default function Ingest() {
                   />
                 </div>
               )}
-              {j.status === "error" && j.error && (
-                <div className="text-red-400 text-xs mt-1">{j.error}</div>
-              )}
+              {j.error && <div className="text-amber-400 text-xs mt-1">{j.error}</div>}
             </div>
           ))}
         </div>
