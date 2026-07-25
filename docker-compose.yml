@@ -1,0 +1,11 @@
+services:
+  life:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
